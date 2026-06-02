@@ -33,30 +33,42 @@ download_zip() {
     echo "OK: ${zip_name}"
 }
 
-download_jpg() {
+download_ref() {
     download_zip \
-        "1AahVnQTOmREru_mV3GGIHfXNABSev0TM" \
-        "jpg.zip"
+        "1wlIJQtHuurkuvMICShBXQ1-LB7FcUqFs" \
+        "ref.zip"
 }
 
-download_png() {
+download_frontais() {
     download_zip \
-        "1fFg79pMWvzHSBQVMwdnL8BibhsokED0W" \
-        "png.zip"
+        "1PSepX05JDyY60Rl9X-RboDJdMbgvH40c" \
+        "frontais.zip"
+}
+download_laterais() {
+    download_zip \
+        "1Sgx1-EcuoJ0V8uzzplhS3_Xl6g78Uzgu" \
+        "laterais.zip"
+}
+
+download_todas() {
+    download_zip \
+        "1IylS2-objFMwU2AIgry2v8jpv62EUTlO" \
+        "todas.zip"
 }
 
 if [[ $# -eq 0 ]]; then
-    download_jpg
-    download_png
+    download_todas
     exit 0
 fi
 
 for arg in "$@"; do
     case "$arg" in
-        jpg) download_jpg ;;
-        png) download_png ;;
+        ref) download_ref ;;
+        frontais) download_frontais ;;
+        laterais) download_laterais ;;
+        todas) download_todas ;;
         *)
-            echo "Uso: $0 [jpg] [png]"
+            echo "Uso: $0 [ref] [laterais] [frontais] [todas]"
             exit 1
             ;;
     esac
