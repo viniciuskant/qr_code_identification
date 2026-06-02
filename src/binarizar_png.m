@@ -1,12 +1,16 @@
+function binarizar_png()
 
-function binarizar_png(pastaEntrada)
+    pastaEntrada = '../images/frontais';
+
     if ~exist(pastaEntrada, 'dir')
         error('A pasta especificada não existe.');
     end
 
     pastaBinarizada = 'output/binarizacao';
 
-    if ~exist(pastaBinarizada, 'dir'), mkdir(pastaBinarizada); end
+    if ~exist(pastaBinarizada, 'dir')
+        mkdir(pastaBinarizada);
+    end
 
     arquivos = dir(fullfile(pastaEntrada, '*.png'));
 
@@ -15,29 +19,242 @@ function binarizar_png(pastaEntrada)
         caminhoImagem = fullfile(pastaEntrada, nomeArquivo);
 
         img = imread(caminhoImagem);
-        img = rgb2gray(img);
+
+        if size(img,3) == 3
+            img = rgb2gray(img);
+        end
+
         img = im2double(img);
 
-        % binarizacao adaptativa
-        janela = round(min(size(img)) / 8); %janela usando 1/8 da mernor dimensão
-        if mod(janela,2)==0, janela = janela+1; end  % ímpar
-        sensibilidade = 0.15;  % entre 0 e 1; quanto menor, mais escuro
+        janela = round(min(size(img))/18);
 
+        if mod(janela,2) == 0
+            janela = janela + 1;
+        end
+
+        sensibilidade = 0.1; % preferi tratar rúido de pixels pretos do que o qrcode ficar falhado
         imgBin = adaptivethresh(img, janela, sensibilidade);
 
-        % remove pequenos ruídos isolados
-        % imgBin = mediana(imgBin, 3); funcionou, mas muito lento
-        imgBin = medfilt2(imgBin, [3 3]); 
+        % usei mediana para a remoção de ruído, mas isso acabava suavisando as bordas e me dificultou depois
+        imgBin = remover_regioes_caoticas(imgBin);
+        imgBin = remover_pretos_isolados(imgBin);
 
-        % salva
+        grade = round(min(size(imgBin))/20);
+
+        imgBin = remover_blocos_esparsos(imgBin, grade);
+        imgBin = filtrar_regioes_grade(imgBin, grade);
+
+        % isso melhora e remove regições que foram consideradas quadradas, mas não são (como uma reta diagonal), mas é um custo que talvez não seja necessário ter
+        % grade = round(min(size(imgBin))/10);
+        % imgBin = remover_blocos_esparsos(imgBin, grade);
+
+        % Adiciona grade apenas para visualização
+        % imgBin = adicionar_grade(imgBin, grade);
+
         [~, nomeBase, ~] = fileparts(nomeArquivo);
         caminhoBIN = fullfile(pastaBinarizada, [nomeBase '.tif']);
-        imwrite(imgBin, caminhoBIN);
 
-        fprintf('Processado: %s (binarização adaptativa)\n', nomeArquivo);
+        imgBin = rot90(imgBin, -1);
+        imwrite(uint8(imgBin)*255, caminhoBIN, 'Compression', 'none');
+        fprintf('Processado: %s\n', nomeArquivo);
+
     end
 
-    fprintf('Concluído! Imagens adaptativas salvas em: %s\n', pastaBinarizada);
+    fprintf('Concluído! Imagens salvas em: %s\n', pastaBinarizada);
+
+end
+
+function imgOut = filtrar_regioes_grade(imgBin, grade)
+    gradeBin = construir_grade_binaria(imgBin, grade);
+    regioes = encontrar_regioes_grade(gradeBin);
+    imgOut = imgBin;
+
+    for i = 1:length(regioes)
+        reg = regioes{i};
+
+        ys = reg(:,1);
+        xs = reg(:,2);
+
+        xmin = min(xs);
+        xmax = max(xs);
+
+        ymin = min(ys);
+        ymax = max(ys);
+
+        largura = (xmax - xmin + 1) * grade;
+        altura  = (ymax - ymin + 1) * grade;
+        aspecto = largura / altura;
+
+        if aspecto < 0.71 || aspecto > 1.40
+            for j = 1:size(reg,1)
+
+                y0 = (reg(j,1)-1)*grade + 1;
+                y1 = min(reg(j,1)*grade, size(imgBin,1));
+
+                x0 = (reg(j,2)-1)*grade + 1;
+                x1 = min(reg(j,2)*grade, size(imgBin,2));
+
+                imgOut(y0:y1, x0:x1) = 1;
+
+            end
+        end
+    end
+end
+
+function regioes = encontrar_regioes_grade(gradeBin)
+    [h, w] = size(gradeBin);
+    visitado = false(h, w);
+    regioes = {};
+    dx = [1 -1 0 0];
+    dy = [0 0 1 -1];
+
+    for y = 1:h
+        for x = 1:w
+            if gradeBin(y,x) == 1 && ~visitado(y,x)
+                fila = [y x];
+                visitado(y,x) = true;
+                reg = [];
+                while ~isempty(fila)
+                    p = fila(1,:);
+                    fila(1,:) = [];
+                    reg(end+1,:) = p;
+
+                    for k = 1:4
+                        ny = p(1) + dy(k);
+                        nx = p(2) + dx(k);
+
+                        if ny>=1 && ny<=h && nx>=1 && nx<=w
+                            if gradeBin(ny,nx) == 1 && ~visitado(ny,nx)
+                                visitado(ny,nx) = true;
+                                fila(end+1,:) = [ny nx];
+                            end
+                        end
+                    end
+                end
+
+                regioes{end+1} = reg;
+            end
+        end
+    end
+end
+
+function gradeBin = construir_grade_binaria(imgBin, grade)
+    [h, w] = size(imgBin);
+    nY = ceil(h / grade);
+    nX = ceil(w / grade);
+
+    gradeBin = false(nY, nX);
+
+    for gy = 1:nY
+        y1 = (gy-1)*grade + 1;
+        y2 = min(gy*grade, h);
+
+        for gx = 1:nX
+            x1 = (gx-1)*grade + 1;
+            x2 = min(gx*grade, w);
+
+            bloco = imgBin(y1:y2, x1:x2);
+            % se tiver qualquer preto, bloco ativo, pois a etapa antirior definidou oq é branco
+            gradeBin(gy, gx) = any(bloco(:) == 0);
+
+        end
+    end
+end
+
+function imgOut = remover_blocos_esparsos(imgBin, blocoTam)
+    fun = @(bs) processar_bloco(bs.data);
+    imgOut = blockproc(imgBin, [blocoTam blocoTam], fun);
+
+end
+
+function blocoProcessado = processar_bloco(bloco, ~)
+    totalPixels = numel(bloco);
+    pretos = sum(bloco(:) == 0);
+    porcentagemPretos = pretos / totalPixels;
+    
+    if porcentagemPretos < 0.05
+        % menos de 5% de pretos: torna bloco todo branco 
+        blocoProcessado = ones(size(bloco), 'like', bloco);
+    else
+        % mantem o bloco original
+        blocoProcessado = bloco;
+    end
+end
+
+
+function imgComGrade = adicionar_grade(img, espacamento)
+    if nargin < 2
+        espacamento = 100;
+    end
+
+    imgComGrade = img;
+    [h, w] = size(img);
+    for x = espacamento:espacamento:w
+        imgComGrade(:,x) = false; 
+    end
+    for y = espacamento:espacamento:h
+        imgComGrade(y,:) = false;
+    end
+end
+
+function imgOut = reduzir_resolucao(imgIn, fator)
+    if fator <= 1
+        imgOut = imgIn;
+        return;
+    end
+
+    imgOut = imresize(imgIn, 1/fator, 'bilinear');
+end
+
+function imgBin = remover_regioes_caoticas(imgBin)
+    janela = 16;
+    [h,w] = size(imgBin);
+    for y = 1:janela:h-janela+1
+        for x = 1:janela:w-janela+1
+            bloco = imgBin(y:y+janela-1, x:x+janela-1);
+            tx = sum(sum(abs(diff(bloco,1,2)))); % transições horizontais
+            ty = sum(sum(abs(diff(bloco,1,1)))); % transições verticais
+
+            score = tx + ty;
+            if score > 50
+                imgBin(y:y+janela-1, x:x+janela-1) = 1;
+            end
+        end
+    end
+end
+
+function imgBin = remover_pretos_isolados(imgBin)
+    [h,w] = size(imgBin);
+
+    saida = imgBin;
+
+    for y = 2:h-1
+        for x = 2:w-1
+
+            if imgBin(y,x) == 0
+                pretos = 0;
+                for dy = -1:1
+                    for dx = -1:1
+                        if dy == 0 && dx == 0
+                            continue;
+                        end
+                        if imgBin(y+dy,x+dx) == 0
+                            pretos = pretos + 1;
+                        end
+                    end
+                end
+                % menos de 2 vizinhos pretos => ruído
+                if pretos < 2
+                    saida(y,x) = 1;
+                end
+
+            end
+
+        end
+    end
+
+    imgBin = saida;
+
 end
 
 function bw = adaptivethresh(I, janela, sensibilidade)
@@ -83,38 +300,7 @@ function intImg = preCalcArea(I)
     end
 end
 
-function imgFiltrada = mediana(img, tamanhoJanela)
-    if mod(tamanhoJanela, 2) == 0
-        error('O tamanho da janela deve ser ímpar.');
-    end
-
-    [M, N] = size(img);
-    raio = floor(tamanhoJanela / 2);
-    imgFiltrada = zeros(M, N);
-
-    for i = 1:M
-        for j = 1:N
-            % limites da janela (com espelhamento nas bordas)
-            i1 = max(1, i - raio);
-            i2 = min(M, i + raio);
-            j1 = max(1, j - raio);
-            j2 = min(N, j + raio);
-
-            % Extrai a janela e a transforma em vetor
-            janela = img(i1:i2, j1:j2);
-            vetor = janela(:);
-
-            % Calcula a mediana (para imagens binárias é o valor que aparece mais vezes)
-            mediana = median(vetor);
-
-            imgFiltrada(i, j) = mediana;
-        end
-    end
-
-end
-
-
-% mative para colocar no relatório que esse método não funciona
+% mantive para colocar no relatório que esse método não funciona
 function binarizar_png_original(pastaEntrada)
     if ~exist(pastaEntrada, 'dir')
         error('A pasta especificada não existe.');
