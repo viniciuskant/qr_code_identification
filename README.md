@@ -6,7 +6,7 @@ As imagens utilizadas no projeto podem ser baixadas com:
 
 ```bash
 cd images
-./download_image.sh
+./download_image.sh [ref] [laterais] [frontais] [todas]
 ```
 basta escolher o pacote desejado.
 
