@@ -1,4 +1,4 @@
-function cantos
+function cantos()
     pastaEntrada = 'output/binarizacao';
     pastaSaida = 'output/cantos';
     pastaSaidaPontos = 'output/cantosPontos';

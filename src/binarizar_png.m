@@ -1,6 +1,6 @@
 function binarizar_png()
 
-    pastaEntrada = '../images/frontais';
+    pastaEntrada = '../images/todas';
 
     if ~exist(pastaEntrada, 'dir')
         error('A pasta especificada não existe.');
@@ -35,7 +35,7 @@ function binarizar_png()
         sensibilidade = 0.1; % preferi tratar rúido de pixels pretos do que o qrcode ficar falhado
         imgBin = adaptivethresh(img, janela, sensibilidade);
 
-        % usei mediana para a remoção de ruído, mas isso acabava suavisando as bordas e me dificultou depois
+        % usei mediana para a remoção de ruído, mas isso acabava suavizando as bordas e me dificultou depois
         imgBin = remover_regioes_caoticas(imgBin);
         imgBin = remover_pretos_isolados(imgBin);
 
@@ -53,7 +53,7 @@ function binarizar_png()
 
         [~, nomeBase, ~] = fileparts(nomeArquivo);
         caminhoBIN = fullfile(pastaBinarizada, [nomeBase '.tif']);
-
+        
         imgBin = rot90(imgBin, -1);
         imwrite(uint8(imgBin)*255, caminhoBIN, 'Compression', 'none');
         fprintf('Processado: %s\n', nomeArquivo);
