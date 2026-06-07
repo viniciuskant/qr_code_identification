@@ -1,6 +1,6 @@
 function binarizar_png()
 
-    pastaEntrada = '../images/todas';
+    pastaEntrada = '../images/reais';
 
     if ~exist(pastaEntrada, 'dir')
         error('A pasta especificada não existe.');
@@ -12,6 +12,12 @@ function binarizar_png()
         mkdir(pastaBinarizada);
     end
 
+    pastaDebug = 'output/debug';
+
+    if ~exist(pastaDebug, 'dir')
+        mkdir(pastaDebug);
+    end
+
     arquivos = dir(fullfile(pastaEntrada, '*.png'));
 
     for k = 1:length(arquivos)
@@ -19,6 +25,7 @@ function binarizar_png()
         caminhoImagem = fullfile(pastaEntrada, nomeArquivo);
 
         img = imread(caminhoImagem);
+        imgOriginalDebug = rot90(img, -1);
 
         if size(img,3) == 3
             img = rgb2gray(img);
@@ -32,16 +39,20 @@ function binarizar_png()
             janela = janela + 1;
         end
 
-        sensibilidade = 0.1; % preferi tratar rúido de pixels pretos do que o qrcode ficar falhado
-        imgBin = adaptivethresh(img, janela, sensibilidade);
+        sensibilidade = 0.08; % preferi tratar rúido de pixels pretos do que o qrcode ficar falhado
+        imgBin = binarizacaoAdaptativa(img, janela, sensibilidade);
 
         % usei mediana para a remoção de ruído, mas isso acabava suavizando as bordas e me dificultou depois
         imgBin = remover_regioes_caoticas(imgBin);
-        imgBin = remover_pretos_isolados(imgBin);
+        % imgBin = remover_pretos_isolados(imgBin);
 
-        grade = round(min(size(imgBin))/20);
+        grade = round(min(size(imgBin))/40);
 
         imgBin = remover_blocos_esparsos(imgBin, grade);
+        imgBin = remover_blocos_isolados(imgBin, grade);
+        imgBin = remover_blocos_esparsos(imgBin, grade * 5);
+        imgBin = remover_blocos_isolados(imgBin, grade * 5);
+        
         imgBin = filtrar_regioes_grade(imgBin, grade);
 
         % isso melhora e remove regições que foram consideradas quadradas, mas não são (como uma reta diagonal), mas é um custo que talvez não seja necessário ter
@@ -58,14 +69,27 @@ function binarizar_png()
         imwrite(uint8(imgBin)*255, caminhoBIN, 'Compression', 'none');
         fprintf('Processado: %s\n', nomeArquivo);
 
+
+        imgOriginalDebug = uint8(imgOriginalDebug);
+
+        imgBinDebug = uint8(imgBin) * 255;
+        imgBinDebug = repmat(imgBinDebug, [1 1 3]); % grayscale -> RGB
+
+        imgDebug = [imgOriginalDebug imgBinDebug];
+
+        caminhoDebug = fullfile(pastaDebug, [nomeBase '.png']);
+        imwrite(imgDebug, caminhoDebug);
+
     end
 
     fprintf('Concluído! Imagens salvas em: %s\n', pastaBinarizada);
 
 end
 
+
 function imgOut = filtrar_regioes_grade(imgBin, grade)
     gradeBin = construir_grade_binaria(imgBin, grade);
+    gradeBin = remover_conexoes_fracas(gradeBin);
     regioes = encontrar_regioes_grade(gradeBin);
     imgOut = imgBin;
 
@@ -161,24 +185,110 @@ function gradeBin = construir_grade_binaria(imgBin, grade)
     end
 end
 
-function imgOut = remover_blocos_esparsos(imgBin, blocoTam)
-    fun = @(bs) processar_bloco(bs.data);
-    imgOut = blockproc(imgBin, [blocoTam blocoTam], fun);
+function gradeFiltrada = remover_conexoes_fracas(gradeBin)
 
+    [h,w] = size(gradeBin);
+    gradeFiltrada = gradeBin;
+
+    for y = 1:h
+        for x = 1:w
+
+            if gradeBin(y,x) == 0
+                continue;
+            end
+
+            viz = 0;
+
+            for dy = -1:1
+                for dx = -1:1
+
+                    if dy == 0 && dx == 0
+                        continue;
+                    end
+
+                    ny = y + dy;
+                    nx = x + dx;
+
+                    if ny>=1 && ny<=h && nx>=1 && nx<=w
+                        if gradeBin(ny,nx) == 1
+                            viz = viz + 1;
+                        end
+                    end
+
+                end
+            end
+
+            if viz < 2
+                gradeFiltrada(y,x) = 0;
+            end
+
+        end
+    end
 end
 
-function blocoProcessado = processar_bloco(bloco, ~)
-    totalPixels = numel(bloco);
-    pretos = sum(bloco(:) == 0);
-    porcentagemPretos = pretos / totalPixels;
-    
-    if porcentagemPretos < 0.05
-        % menos de 5% de pretos: torna bloco todo branco 
-        blocoProcessado = ones(size(bloco), 'like', bloco);
-    else
-        % mantem o bloco original
-        blocoProcessado = bloco;
+function imgOut = remover_blocos_esparsos(imgBin, blocoTam)
+
+    [h,w] = size(imgBin);
+
+    nLin = ceil(h/blocoTam);
+    nCol = ceil(w/blocoTam);
+
+    porcentagens = zeros(nLin,nCol);
+
+    % Primeira passada: calcular porcentagens
+    for i = 1:nLin
+        for j = 1:nCol
+
+            y1 = (i-1)*blocoTam + 1;
+            y2 = min(i*blocoTam,h);
+
+            x1 = (j-1)*blocoTam + 1;
+            x2 = min(j*blocoTam,w);
+
+            bloco = imgBin(y1:y2,x1:x2);
+
+            porcentagens(i,j) = sum(bloco(:)==0) / numel(bloco);
+
+        end
     end
+
+    % Média dos blocos que possuem algum preto
+    valores = porcentagens(porcentagens > 0);
+
+    if isempty(valores)
+        imgOut = imgBin;
+        return;
+    end
+
+    limiar = mean(valores);
+
+    % opcional: tornar mais permissivo
+    limiar_minimo = 0.25 * limiar;
+    limiar_maximo = 85;
+    % limiar_maximo = max(3 * limiar, 1);
+
+    imgOut = imgBin;
+    % Segunda passada: remover blocos fora da faixa aceitável
+    for i = 1:nLin
+        for j = 1:nCol
+
+            p = porcentagens(i,j);
+
+            if (p < limiar_minimo) || (p > limiar_maximo)
+
+                y1 = (i-1)*blocoTam + 1;
+                y2 = min(i*blocoTam,h);
+
+                x1 = (j-1)*blocoTam + 1;
+                x2 = min(j*blocoTam,w);
+
+                imgOut(y1:y2,x1:x2) = 1;
+
+            end
+
+        end
+    end
+
 end
 
 
@@ -223,6 +333,107 @@ function imgBin = remover_regioes_caoticas(imgBin)
     end
 end
 
+
+function imgOut = remover_blocos_isolados(imgBin, blocoTam)
+
+    imgOut = imgBin;
+
+    mudou = true;
+
+    while mudou
+
+        mudou = false;
+
+        [h,w] = size(imgOut);
+
+        nLin = floor(h/blocoTam);
+        nCol = floor(w/blocoTam);
+
+        mapa = false(nLin,nCol);
+
+        % Detecta blocos com preto
+        for i = 1:nLin
+            for j = 1:nCol
+
+                y1 = (i-1)*blocoTam + 1;
+                y2 = i*blocoTam;
+
+                x1 = (j-1)*blocoTam + 1;
+                x2 = j*blocoTam;
+
+                bloco = imgOut(y1:y2, x1:x2);
+
+                mapa(i,j) = any(bloco(:) == 0);
+
+            end
+        end
+
+        remover = false(nLin,nCol);
+
+        for i = 1:nLin
+            for j = 1:nCol
+
+                if ~mapa(i,j)
+                    continue;
+                end
+
+                % ---- vizinhos por direção ----
+                temH = false; % esquerda/direita
+                temV = false; % cima/baixo
+
+                % esquerda
+                if j > 1 && mapa(i,j-1)
+                    temH = true;
+                end
+
+                % direita
+                if j < nCol && mapa(i,j+1)
+                    temH = true;
+                end
+
+                % cima
+                if i > 1 && mapa(i-1,j)
+                    temV = true;
+                end
+
+                % baixo
+                if i < nLin && mapa(i+1,j)
+                    temV = true;
+                end
+
+                % regra nova:
+                % precisa ter conexão nas DUAS direções
+                if ~(temH && temV)
+                    remover(i,j) = true;
+                end
+
+            end
+        end
+
+        % aplica remoção
+        for i = 1:nLin
+            for j = 1:nCol
+
+                if remover(i,j)
+
+                    y1 = (i-1)*blocoTam + 1;
+                    y2 = i*blocoTam;
+
+                    x1 = (j-1)*blocoTam + 1;
+                    x2 = j*blocoTam;
+
+                    imgOut(y1:y2, x1:x2) = 1;
+                    mudou = true;
+
+                end
+
+            end
+        end
+
+    end
+
+end
+
 function imgBin = remover_pretos_isolados(imgBin)
     [h,w] = size(imgBin);
 
@@ -257,7 +468,7 @@ function imgBin = remover_pretos_isolados(imgBin)
 
 end
 
-function bw = adaptivethresh(I, janela, sensibilidade)
+function bw = binarizacaoAdaptativa(I, janela, sensibilidade)
     % calcula imagem integral
     intImg = preCalcArea(I);
 
