@@ -65,7 +65,7 @@ function qrcode()
                         img2(obj_cand.lin(ii), obj_cand.col(ii), 2) = 255;
                         img2(obj_cand.lin(ii), obj_cand.col(ii), 3) = 0;
                     end
-                    img2 = desenhar_poligono(img2, obj_cand.corners, [255,255,255]);
+                    img2 = desenhar_poligono(img2, obj_cand.corners);
                 end
             end
         else
@@ -80,7 +80,7 @@ function qrcode()
                 img3(lin(idx), col(idx), 2) = 255;
             end
             [corners, ~, ~] = obter_retangulo_orientado(lin, col);
-            img3 = desenhar_poligono(img3, corners, [0,255,0]);
+            img3 = desenhar_poligono(img3, corners);
         end
         imwrite(img3, fullfile(pastaQRcode, [nomeBase '.png']));
 
@@ -104,6 +104,8 @@ function [img_triangulo, melhor_grupo] = melhor_combinacao_3(bordas, candidatos,
     if nargin < 6, min_ratio = 0.7; end
     if nargin < 7, VERBOSE = false; end
 
+    max_angulo = 0.1;
+
     %todas as combinações de 3 a partir de todos os grupos
     combos_cell = {};
     for g = 1:length(grupos)
@@ -124,93 +126,102 @@ function [img_triangulo, melhor_grupo] = melhor_combinacao_3(bordas, candidatos,
 
     fprintf('Total de combinações de 3: %d\n', size(combos, 1));
 
-    melhor_relaxado = []; % razão >= min_ratio & não colinear, desempate menor raio
-    melhor_restrito = []; % razão >= min_ratio & área >= min_area & não colinear, desempate maior razao
-    melhor_por_ratio = []; % não colinear, maior razao (ignora razão e área mínima)
-    melhor_por_ratio_sem_colinear = []; % fallback: maior razao (ignora razão, área mínima e colinearidade)
+    % melhores combinações
+    melhor_angulo_idx = []; % angulo + área>=min_area + razão>=min_ratio + colinear
+    melhor_area_idx = []; % área>=min_area + razão>=min_ratio + colinear
+    melhor_razao_idx = []; % razão>=min_ratio + colinear
+    melhor_colinear_idx = []; % maior razão (com colinear)
+    fallback_idx = []; % maior razão (ignora colinear)
 
+    melhor_angulo = inf; 
     melhor_raio_relaxado = inf;
-    melhor_area_fallback = -inf;
-
-    melhor_ratio_restrito = -inf;
+    melhor_ratio_restrito = -inf; % maior razão no critério restrito
     melhor_ratio_fallback = -inf;
     melhor_ratio_fallback_sem_colinear = -inf;
 
     for c = 1:size(combos, 1)
-        idxs = combos(c, :); 
+        idxs = combos(c, :);
         p1 = candidatos(idxs(1)).centro;
         p2 = candidatos(idxs(2)).centro;
         p3 = candidatos(idxs(3)).centro;
-        
-        % razões de proporção
+
+        % Distâncias e razões de proporção
         d12 = norm(p1-p2);
         d13 = norm(p1-p3);
         d23 = norm(p2-p3);
-        ratio1 = min(d12,d13) / max(d12,d13);
-        ratio2 = min(d12,d23) / max(d12,d23);
-        ratio3 = min(d13,d23) / max(d13,d23);
+        ratio1 = min(d12,d13)/max(d12,d13);
+        ratio2 = min(d12,d23)/max(d12,d23);
+        ratio3 = min(d13,d23)/max(d13,d23);
         min_ratio_combo = min([ratio1, ratio2, ratio3]);
-        
-        % fallback por maior razao
+
+        % Fallback: maior razão (ignora colinearidade, atualiza sempre)
         if min_ratio_combo > melhor_ratio_fallback_sem_colinear
             melhor_ratio_fallback_sem_colinear = min_ratio_combo;
-            melhor_por_ratio_sem_colinear = idxs;
+            fallback_idx = idxs;
         end
 
-        % fator de colinearidade
+        % Fator de colinearidade (normalizado)
         area = abs((p2(1)-p1(1))*(p3(2)-p1(2)) - (p3(1)-p1(1))*(p2(2)-p1(2))) / 2;
         d_max = max([d12, d13, d23]);
         colinearidade = area / (d_max^2);
-        if colinearidade < 0.15  
-            continue;
+        if colinearidade < 0.15
+            continue;   % ignora combinações muito colineares
         end
 
-        % por maior ratio
+        % Fallback: maior razão (respeita colinearidade)
         if min_ratio_combo > melhor_ratio_fallback
             melhor_ratio_fallback = min_ratio_combo;
-            melhor_por_ratio = idxs;
+            melhor_colinear_idx = idxs;
         end
-        
-        % razão mínima
+
+        angulo = escolhe_melhor_angulo(p1, p2, p3);
+        fprintf('Angulos: %.2f\n', angulo);
+
+        % Critérios que exigem razão mínima
         if min_ratio_combo >= min_ratio
             raio = circumradius(p1,p2,p3);
-            % relaxado: só razão
             if raio < melhor_raio_relaxado
                 melhor_raio_relaxado = raio;
-                melhor_relaxado = idxs;
+                melhor_razao_idx = idxs;
             end
-            %restrito: razão E área mínima
-            if area >= min_area && melhor_ratio_restrito < min_ratio 
+            if area >= min_area && min_ratio_combo > melhor_ratio_restrito
                 melhor_ratio_restrito = min_ratio_combo;
-                melhor_restrito = idxs;
+                melhor_area_idx = idxs;
+            end
+            if area >= min_area && angulo < max_angulo && angulo < melhor_angulo
+                melhor_angulo = angulo;
+                melhor_angulo_idx = idxs;
             end
         end
     end
-    
-    % a melhor combinação segundo a hierarquia
-    if ~isempty(melhor_restrito)
-        melhor_combo = melhor_restrito;
+
+    if ~isempty(melhor_angulo_idx)
+        melhor_combo = melhor_angulo_idx;
         if VERBOSE
-            fprintf('Usando critério restrito (razão≥%.2f e área≥%d px2)\n', min_ratio, min_area);
+            fprintf('\nSelecionado: CRITÉRIO MAIS RESTRITO (ângulo reto<=%.2f + área>=%d + razão>=%.2f + colinear)\n', max_angulo, min_area, min_ratio);
         end
-    elseif ~isempty(melhor_relaxado)
-        melhor_combo = melhor_relaxado;
+    elseif ~isempty(melhor_area_idx)
+        melhor_combo = melhor_area_idx;
         if VERBOSE
-            fprintf('Usando critério relaxado (apenas razão≥%.2f)\n', min_ratio);
+            fprintf('\nSelecionado: CRITÉRIO RESTRITO (área>=%d + razão>=%.2f)\n', min_area, min_ratio);
+        end
+    elseif ~isempty(melhor_razao_idx)
+        melhor_combo = melhor_razao_idx;
+        if VERBOSE
+            fprintf('\nSelecionado: CRITÉRIO RELAXADO (razão>=%.2f)\n', min_ratio);
+        end
+    elseif ~isempty(melhor_colinear_idx)
+        melhor_combo = melhor_colinear_idx;
+        if VERBOSE
+            fprintf('\nSelecionado: FALLBACK (maior razão com colinearidade = %.4f)\n', melhor_ratio_fallback);
         end
     else
-        if ~isempty(melhor_por_ratio)
-            melhor_combo = melhor_por_ratio;
-            if VERBOSE
-                fprintf('Nenhuma combinação atende à razão mínima. Usando a de maior razão (%.2f)\n', melhor_ratio_fallback);
-            end
-        elseif ~isempty(melhor_por_ratio_sem_colinear)
-            melhor_combo = melhor_por_ratio_sem_colinear;
-            if VERBOSE
-                fprintf('Nenhuma combinação!. Usando a de maior razão e colinear (%.2f)\n', melhor_ratio_fallback);
-            end
+        melhor_combo = fallback_idx;
+        if VERBOSE
+            fprintf('\nSelecionado: FALLBACK EXTREMO (maior razão sem colinearidade = %.4f)\n', melhor_ratio_fallback_sem_colinear);
         end
     end
+
     
     melhor_grupo = melhor_combo;
     
@@ -218,11 +229,36 @@ function [img_triangulo, melhor_grupo] = melhor_combinacao_3(bordas, candidatos,
     if isempty(melhor_grupo)
         fprintf('Nenhum candidato\n');
     else 
+        idxs = melhor_combo;
+        p1 = candidatos(idxs(1)).centro;
+        p2 = candidatos(idxs(2)).centro;
+        p3 = candidatos(idxs(3)).centro;
+        d12 = norm(p1-p2);
+        d13 = norm(p1-p3);
+        d23 = norm(p2-p3);
+        ratio1 = min(d12,d13)/max(d12,d13);
+        ratio2 = min(d12,d23)/max(d12,d23);
+        ratio3 = min(d13,d23)/max(d13,d23);
+        min_ratio_combo = min([ratio1, ratio2, ratio3]);
+        area = abs((p2(1)-p1(1))*(p3(2)-p1(2)) - (p3(1)-p1(1))*(p2(2)-p1(2))) / 2;
+        d_max = max([d12, d13, d23]);
+        colinearidade = area / (d_max^2);
+        angulo = escolhe_melhor_angulo(p1, p2, p3);
+        raio = circumradius(p1, p2, p3);
+        
+        % fprintf('\n=== COMBO FINAL ===\n');
+        % fprintf('Índices: %d, %d, %d\n', idxs(1), idxs(2), idxs(3));
+        % fprintf('Razão mínima (proporção lados): %.4f\n', min_ratio_combo);
+        % fprintf('Área do triângulo: %.1f px²\n', area);
+        % fprintf('Colinearidade (area/d_max²): %.4f\n', colinearidade);
+        fprintf('>>>>>>>>>>>>>>>>> Distância ao ângulo reto (0 = perfeito): %.4f\n', angulo);
+        % fprintf('Raio circunscrito: %.1f px\n', raio);
+        % fprintf('===================\n');
         for idx = melhor_grupo
             for ii = 1:length(candidatos(idx).lin)
                 img_triangulo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 2) = 255;
             end
-            img_triangulo = desenhar_poligono(img_triangulo, candidatos(idx).corners, [0,255,0]);
+            img_triangulo = desenhar_poligono(img_triangulo, candidatos(idx).corners);
         end
         pts = [candidatos(melhor_grupo(1)).centro;
             candidatos(melhor_grupo(2)).centro;
@@ -237,6 +273,25 @@ function [img_triangulo, melhor_grupo] = melhor_combinacao_3(bordas, candidatos,
     if VERBOSE
         imwrite(img_triangulo, img_path);
     end
+end
+
+function melhor_dist_vertice = escolhe_melhor_angulo(p1, p2, p3)
+    v12 = p2 - p1;
+    v13 = p3 - p1;
+
+    erro1 = abs(dot(v12,v13)) / (norm(v12)*norm(v13));
+
+    v21 = p1 - p2;
+    v23 = p3 - p2;
+
+    erro2 = abs(dot(v21,v23)) / (norm(v21)*norm(v23));
+
+    v31 = p1 - p3;
+    v32 = p2 - p3;
+
+    erro3 = abs(dot(v31,v32)) / (norm(v31)*norm(v32));
+
+    melhor_dist_vertice = min([erro1 erro2 erro3]);
 end
 
 function [img_grupos, grupos] = agrupa_por_tamanho(candidatos, img_grupos, img_path, VERBOSE)
@@ -288,7 +343,7 @@ function [img_grupos, grupos] = agrupa_por_tamanho(candidatos, img_grupos, img_p
                 img_grupos(candidatos(idx).lin(ii), candidatos(idx).col(ii), 2) = cor(2);
                 img_grupos(candidatos(idx).lin(ii), candidatos(idx).col(ii), 3) = cor(3);
             end
-            img_grupos = desenhar_poligono(img_grupos, candidatos(idx).corners, cor);
+            img_grupos = desenhar_poligono(img_grupos, candidatos(idx).corners);
         end
     end
     if VERBOSE imwrite(img_grupos, img_path); end
@@ -320,7 +375,7 @@ function [candidatos, img_candidatos] = filtro_por_formato(arvore, profundidade,
                     img_candidatos(lin(idx), col(idx), 2) = 255;
                     img_candidatos(lin(idx), col(idx), 3) = 0;
                 end
-                img_candidatos = desenhar_poligono(img_candidatos, corners, [255,255,0]);
+                img_candidatos = desenhar_poligono(img_candidatos, corners);
             end
         end
     end
@@ -436,6 +491,8 @@ function [corners, largura, altura] = obter_retangulo_orientado(lin, col)
 end
 
 function img = desenhar_poligono(img, pontos, cor)
+    if nargin < 3 cor = [255, 51, 153]; end
+
     pontos = round(pontos);
     n = size(pontos, 1);
     for i = 1:n
