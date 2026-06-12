@@ -36,21 +36,22 @@ function binariza(pastaEntrada)
             janela = janela + 1;
         end
 
-        sensibilidade = 0.09;
+        sensibilidade = 0.08;
 
         imgBin = binarizacaoAdaptativa(img, janela, sensibilidade);
 
-        imgBin = remover_regioes_caoticas(imgBin);
-        imgBin = remover_pretos_isolados(imgBin);
+        if min(size(imgBin)) > 400
+            imgBin = remover_regioes_caoticas(imgBin);
+            imgBin = remover_pretos_isolados(imgBin);
 
-        grade = round(min(size(imgBin))/40);
+            grade = round(min(size(imgBin))/40);
 
-        imgBin = remover_blocos_esparsos(imgBin, grade);
-        imgBin = remover_blocos_isolados(imgBin, grade);
+            imgBin = remover_blocos_esparsos(imgBin, grade);
+            imgBin = remover_blocos_isolados(imgBin, grade);
 
-        imgBin = remover_blocos_esparsos(imgBin, grade * 5);
-        imgBin = remover_blocos_isolados(imgBin, grade * 5);
-
+            imgBin = remover_blocos_esparsos(imgBin, grade * 5);
+            imgBin = remover_blocos_isolados(imgBin, grade * 5);
+        end 
         imgBin = rot90(imgBin,-1);
 
         [~, nomeBase, ~] = fileparts(nomeArquivo);

@@ -1,8 +1,8 @@
 function qrcode()
     pastaBinarizada = 'output/binarizacao';
-    pastaDebug = 'output/debug2';
-    pastaHierarquia = 'output/hierarquia2';
-    pastaQRcode = 'output/qrcode2';
+    pastaDebug = 'output/debug';
+    pastaHierarquia = 'output/hierarquia';
+    pastaQRcode = 'output/qrcode';
     VERBOSE = true;
 
     if ~exist(pastaBinarizada, 'dir'), binariza(); end
@@ -27,21 +27,21 @@ function qrcode()
         img_bin = repmat(uint8(M) * 255, [1, 1, 3]);
         bordas = bordas_op(M);
         arvore = arvore_hierarquia(bordas);
-        hierarquia_img = obter_hierarquia(arvore);
         
-        hierarquia_img = []; 
-        for obj = hierarquia.keys()
-            if hierarquia(obj{1}) >= 3
-                hierarquia_img(end+1) = obj{1};
+        hierarquia_img = obter_hierarquia(arvore);
+        profundidade = []; 
+        for obj = hierarquia_img.keys()
+            if hierarquia_img(obj{1}) >= 3
+                profundidade(end+1) = obj{1};
             end
         end
 
-        if isempty(hierarquia_img)
+        if isempty(profundidade)
             fprintf('Nenhuma hierarquia em %s\n', nomeBase);
             continue;
         end
         if VERBOSE 
-            fprintf('%d objeto(s) em %s: %s\n', length(obj_profundos), nomeBase, mat2str(obj_profundos));
+            fprintf('%d objeto(s) em %s: %s\n', length(profundidade), nomeBase, mat2str(profundidade));
         end 
 
         % objetos com mais de x hierarquias em vermelho
@@ -49,7 +49,7 @@ function qrcode()
         todos_objetos = unique(abs(bordas(abs(bordas)>0)));
         for obj = todos_objetos'
             [lin, col] = find(abs(bordas) == obj);
-            if ismember(obj, obj_profundos)
+            if ismember(obj, profundidade)
                 for idx = 1:length(lin)
                     img1(lin(idx), col(idx), 1) = 255;
                 end
@@ -63,127 +63,123 @@ function qrcode()
         end
         imwrite(img1, fullfile(pastaHierarquia, [nomeBase '_profundidade.png']));
 
-        % --- Imagem 2: retangulos (azul) e finders (verde) ---
-        img2 = zeros([size(bordas), 3], 'uint8');
-        finder_labels = [];
-        for obj = obj_profundos
+        % imagem auxiliar para candidatos (amarelo)
+        img_candidatos = zeros([size(bordas), 3], 'uint8');
+        
+        candidatos = [];
+        for obj = profundidade
             [lin, col] = find(abs(bordas) == obj);
             [corners, largura, altura] = obter_retangulo_orientado(lin, col);
             razao = largura / altura;
             if (razao >= 0.7 && razao <= 1.3) || (1/razao >= 0.7 && 1/razao <= 1.3)
-                if verificar_finder_pattern(arvore, bordas, obj)
-                    finder_labels(end+1) = obj;
+                if isKey(arvore.obj_children, obj) && ~isempty(arvore.obj_children(obj))
+                    tamanho = (largura + altura) / 2;
+                    centro = [mean(lin), mean(col)];
+                    candidatos(end+1).obj = obj;
+                    candidatos(end).tamanho = tamanho;
+                    candidatos(end).centro = centro;
+                    candidatos(end).corners = corners;
+                    candidatos(end).lin = lin;
+                    candidatos(end).col = col;
+                    % Pinta de amarelo
                     for idx = 1:length(lin)
-                        img2(lin(idx), col(idx), 2) = 255;
+                        img_candidatos(lin(idx), col(idx), 1) = 255;
+                        img_candidatos(lin(idx), col(idx), 2) = 255;
+                        img_candidatos(lin(idx), col(idx), 3) = 0;
                     end
-                else
-                    for idx = 1:length(lin)
-                        img2(lin(idx), col(idx), 3) = 255;
-                    end
-                end
-                img2 = desenhar_poligono(img2, corners, [255,255,255]);
-            else
-                for idx = 1:length(lin)
-                    img2(lin(idx), col(idx), 1) = 80;
-                    img2(lin(idx), col(idx), 2) = 80;
-                    img2(lin(idx), col(idx), 3) = 80;
+                    img_candidatos = desenhar_poligono(img_candidatos, corners, [255,255,0]);
                 end
             end
         end
-        imwrite(img2, fullfile(pastaDebug, [nomeBase '_etapa1_retangulos.png']));
-
-        % --- Imagem auxiliar para candidatos (amarelo) ---
-        img_candidatos = zeros([size(bordas), 3], 'uint8');
+        imwrite(img_candidatos, fullfile(pastaDebug, [nomeBase '_etapa1_candidatos_amarelo.png']));
         
-        % --- FALLBACK: se nenhum finder pattern com critério rígido ---
-        fallback_ativado = false;
-        if isempty(finder_labels)
-            fallback_ativado = true;
-            fprintf('Nenhum finder pattern com critério rígido. Aplicando relaxamento e filtro de tamanho...\n');
-            candidatos = [];
-            for obj = obj_profundos
-                [lin, col] = find(abs(bordas) == obj);
-                [corners, largura, altura] = obter_retangulo_orientado(lin, col);
-                razao = largura / altura;
-                if (razao >= 0.7 && razao <= 1.3) || (1/razao >= 0.7 && 1/razao <= 1.3)
-                    if isKey(arvore.obj_children, obj) && ~isempty(arvore.obj_children(obj))
-                        tamanho = (largura + altura) / 2;
-                        centro = [mean(lin), mean(col)];
-                        candidatos(end+1).obj = obj;
-                        candidatos(end).tamanho = tamanho;
-                        candidatos(end).centro = centro;
-                        candidatos(end).corners = corners;
-                        candidatos(end).lin = lin;
-                        candidatos(end).col = col;
-                        % Pinta de amarelo
-                        for idx = 1:length(lin)
-                            img_candidatos(lin(idx), col(idx), 1) = 255;
-                            img_candidatos(lin(idx), col(idx), 2) = 255;
-                            img_candidatos(lin(idx), col(idx), 3) = 0;
-                        end
-                        img_candidatos = desenhar_poligono(img_candidatos, corners, [255,255,0]);
+        finder_labels = [];
+        img_grupos = zeros([size(bordas), 3], 'uint8');
+        if length(candidatos) >= 3
+            % Agrupa por tamanho similar (15%)
+            n_cand = length(candidatos);
+            similar = false(n_cand);
+            for i = 1:n_cand
+                for j = i+1:n_cand
+                    if abs(candidatos(i).tamanho - candidatos(j).tamanho) / ...
+                        max(candidatos(i).tamanho, candidatos(j).tamanho) <= 0.15
+                        similar(i,j) = true;
+                        similar(j,i) = true;
                     end
                 end
             end
-            imwrite(img_candidatos, fullfile(pastaDebug, [nomeBase '_etapa2_candidatos_amarelo.png']));
             
-            if length(candidatos) >= 3
-                % Agrupa por tamanho similar (15%)
-                n_cand = length(candidatos);
-                similar = false(n_cand);
-                for i = 1:n_cand
-                    for j = i+1:n_cand
-                        if abs(candidatos(i).tamanho - candidatos(j).tamanho) / ...
-                           max(candidatos(i).tamanho, candidatos(j).tamanho) <= 0.15
-                            similar(i,j) = true;
-                            similar(j,i) = true;
-                        end
-                    end
-                end
-                
-                grupos = {};
-                visitado = false(1, n_cand);
-                for i = 1:n_cand
-                    if ~visitado(i)
-                        grupo = [];
-                        pilha = i;
-                        while ~isempty(pilha)
-                            atual = pilha(1);
-                            pilha(1) = [];
-                            if ~visitado(atual)
-                                visitado(atual) = true;
-                                grupo(end+1) = atual;
-                                for j = 1:n_cand
-                                    if similar(atual, j) && ~visitado(j)
-                                        pilha(end+1) = j;
-                                    end
+            grupos = {};
+            visitado = false(1, n_cand);
+            for i = 1:n_cand
+                if ~visitado(i)
+                    grupo = [];
+                    pilha = i;
+                    while ~isempty(pilha)
+                        atual = pilha(1);
+                        pilha(1) = [];
+                        if ~visitado(atual)
+                            visitado(atual) = true;
+                            grupo(end+1) = atual;
+                            for j = 1:n_cand
+                                if similar(atual, j) && ~visitado(j)
+                                    pilha(end+1) = j;
                                 end
                             end
                         end
-                        if length(grupo) >= 3
-                            grupos{end+1} = grupo;
-                        end
+                    end
+                    if length(grupo) >= 3
+                        grupos{end+1} = grupo;
                     end
                 end
-                
-                % Imagem dos grupos (cada grupo uma cor)
-                img_grupos = zeros([size(bordas), 3], 'uint8');
-                cores = [255,0,0; 0,255,0; 0,0,255; 255,255,0; 255,0,255; 0,255,255];
+            end
+            
+            % imagem dos grupos (cada grupo uma cor)
+            cores = [255,0,0; 0,255,0; 0,0,255; 255,255,0; 255,0,255; 0,255,255];
+            for g = 1:length(grupos)
+                cor = cores(mod(g-1, size(cores,1))+1,:);
+                for idx = grupos{g}
+                    for ii = 1:length(candidatos(idx).lin)
+                        img_grupos(candidatos(idx).lin(ii), candidatos(idx).col(ii), 1) = cor(1);
+                        img_grupos(candidatos(idx).lin(ii), candidatos(idx).col(ii), 2) = cor(2);
+                        img_grupos(candidatos(idx).lin(ii), candidatos(idx).col(ii), 3) = cor(3);
+                    end
+                    img_grupos = desenhar_poligono(img_grupos, candidatos(idx).corners, cor);
+                end
+            end
+            imwrite(img_grupos, fullfile(pastaDebug, [nomeBase '_etapa2_grupos_por_tamanho.png']));
+            
+
+
+            if ~isempty(grupos)
+                % separa grupos por tamanho
+                grupos_tres = {};
+                grupos_outros = {};
                 for g = 1:length(grupos)
-                    cor = cores(mod(g-1, size(cores,1))+1,:);
-                    for idx = grupos{g}
-                        for ii = 1:length(candidatos(idx).lin)
-                            img_grupos(candidatos(idx).lin(ii), candidatos(idx).col(ii), 1) = cor(1);
-                            img_grupos(candidatos(idx).lin(ii), candidatos(idx).col(ii), 2) = cor(2);
-                            img_grupos(candidatos(idx).lin(ii), candidatos(idx).col(ii), 3) = cor(3);
-                        end
-                        img_grupos = desenhar_poligono(img_grupos, candidatos(idx).corners, cor);
+                    if length(grupos{g}) == 3
+                        grupos_tres{end+1} = grupos{g};
+                    else
+                        grupos_outros{end+1} = grupos{g};
                     end
                 end
-                imwrite(img_grupos, fullfile(pastaDebug, [nomeBase '_etapa3_grupos_por_tamanho.png']));
                 
-                % Escolhe melhor grupo (mais próximo de 3, maior tamanho médio)
-                if ~isempty(grupos)
+                if ~isempty(grupos_tres)
+                    % entre os grupos de tamanho 3, escolhe o de menor raio circunscrito
+                    melhor_raio = inf;
+                    melhor_grupo = [];
+                    for g = 1:length(grupos_tres)
+                        idxs = grupos_tres{g};
+                        p1 = candidatos(idxs(1)).centro;
+                        p2 = candidatos(idxs(2)).centro;
+                        p3 = candidatos(idxs(3)).centro;
+                        raio = circumradius(p1, p2, p3);
+                        if raio < melhor_raio
+                            melhor_raio = raio;
+                            melhor_grupo = idxs;
+                        end
+                    end
+                else
+                    % para grupos com tamanho diferente de 3: tamanho
                     melhor_idx = 1;
                     melhor_dist = abs(length(grupos{1}) - 3);
                     tamanhos_primeiro = [candidatos(grupos{1}).tamanho];
@@ -193,81 +189,82 @@ function qrcode()
                         tamanhos_atual = [candidatos(grupos{g}).tamanho];
                         tam_atual = mean(tamanhos_atual);
                         if (dist_atual < melhor_dist) || ...
-                           (dist_atual == melhor_dist && tam_atual > melhor_tamanho)
+                            (dist_atual == melhor_dist && tam_atual > melhor_tamanho)
                             melhor_dist = dist_atual;
                             melhor_tamanho = tam_atual;
                             melhor_idx = g;
                         end
                     end
                     melhor_grupo = grupos{melhor_idx};
+                end
+    
+                % imagem do grupo selecionado (amarelo)
+                % TODO: aqui há um problema se houver um reído que foi considerado quadrado pela hierarquia, ver como reslver esse probelma
+                img_melhor_grupo = zeros([size(bordas), 3], 'uint8');
+                for idx = melhor_grupo
+                    for ii = 1:length(candidatos(idx).lin)
+                        img_melhor_grupo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 1) = 255;
+                        img_melhor_grupo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 2) = 255;
+                        img_melhor_grupo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 3) = 0;
+                    end
+                    img_melhor_grupo = desenhar_poligono(img_melhor_grupo, candidatos(idx).corners, [255,255,0]);
+                end
+                imwrite(img_melhor_grupo, fullfile(pastaDebug, [nomeBase '_etapa3_grupo_selecionado.png']));
+                
+                % Sub‑seleção por triângulo se houver mais de 3
+                if length(melhor_grupo) > 3
+                    combos = nchoosek(melhor_grupo, 3);
+                    melhor_raio = inf;
+                    melhor_combo = [];
+                    for c = 1:size(combos,1)
+                        idxs = combos(c,:);
+                        p1 = candidatos(idxs(1)).centro;
+                        p2 = candidatos(idxs(2)).centro;
+                        p3 = candidatos(idxs(3)).centro;
+                        raio = circumradius(p1, p2, p3);
+                        if raio < melhor_raio
+                            melhor_raio = raio;
+                            melhor_combo = idxs;
+                        end
+                    end
+                    melhor_grupo = melhor_combo;
                     
-                    % Imagem do grupo selecionado (amarelo)
-                    img_melhor_grupo = zeros([size(bordas), 3], 'uint8');
+                    % Imagem do triângulo escolhido
+                    img_triangulo = zeros([size(bordas), 3], 'uint8');
                     for idx = melhor_grupo
                         for ii = 1:length(candidatos(idx).lin)
-                            img_melhor_grupo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 1) = 255;
-                            img_melhor_grupo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 2) = 255;
-                            img_melhor_grupo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 3) = 0;
+                            img_triangulo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 2) = 255;
                         end
-                        img_melhor_grupo = desenhar_poligono(img_melhor_grupo, candidatos(idx).corners, [255,255,0]);
+                        img_triangulo = desenhar_poligono(img_triangulo, candidatos(idx).corners, [0,255,0]);
                     end
-                    imwrite(img_melhor_grupo, fullfile(pastaDebug, [nomeBase '_etapa4_grupo_selecionado.png']));
-                    
-                    % Sub‑seleção por triângulo se houver mais de 3
-                    if length(melhor_grupo) > 3
-                        combos = nchoosek(melhor_grupo, 3);
-                        melhor_raio = inf;
-                        melhor_combo = [];
-                        for c = 1:size(combos,1)
-                            idxs = combos(c,:);
-                            p1 = candidatos(idxs(1)).centro;
-                            p2 = candidatos(idxs(2)).centro;
-                            p3 = candidatos(idxs(3)).centro;
-                            raio = circumradius(p1, p2, p3);
-                            if raio < melhor_raio
-                                melhor_raio = raio;
-                                melhor_combo = idxs;
-                            end
-                        end
-                        melhor_grupo = melhor_combo;
-                        
-                        % Imagem do triângulo escolhido
-                        img_triangulo = zeros([size(bordas), 3], 'uint8');
-                        for idx = melhor_grupo
-                            for ii = 1:length(candidatos(idx).lin)
-                                img_triangulo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 2) = 255;
-                            end
-                            img_triangulo = desenhar_poligono(img_triangulo, candidatos(idx).corners, [0,255,0]);
-                        end
-                        % Desenhar linhas do triângulo
-                        pts = [candidatos(melhor_grupo(1)).centro;
-                               candidatos(melhor_grupo(2)).centro;
-                               candidatos(melhor_grupo(3)).centro];
-                        for i = 1:3
-                            p1 = round(pts(i,:));
-                            p2 = round(pts(mod(i,3)+1,:));
-                            img_triangulo = desenhar_linha(img_triangulo, p1(2), p1(1), p2(2), p2(1), [255,255,255]);
-                        end
-                        imwrite(img_triangulo, fullfile(pastaDebug, [nomeBase '_etapa5_triangulo_escolhido.png']));
+                    % Desenhar linhas do triângulo
+                    pts = [candidatos(melhor_grupo(1)).centro;
+                            candidatos(melhor_grupo(2)).centro;
+                            candidatos(melhor_grupo(3)).centro];
+                    for i = 1:3
+                        p1 = round(pts(i,:));
+                        p2 = round(pts(mod(i,3)+1,:));
+                        img_triangulo = desenhar_linha(img_triangulo, p1(2), p1(1), p2(2), p2(1), [255,255,255]);
                     end
-                    
-                    finder_labels = [candidatos(melhor_grupo).obj];
-                    % Atualiza img2 com os finders em verde
-                    for idxc = melhor_grupo
-                        obj_cand = candidatos(idxc);
-                        for ii = 1:length(obj_cand.lin)
-                            img2(obj_cand.lin(ii), obj_cand.col(ii), 2) = 255;
-                            img2(obj_cand.lin(ii), obj_cand.col(ii), 3) = 0;
-                        end
-                        img2 = desenhar_poligono(img2, obj_cand.corners, [255,255,255]);
-                    end
+                    imwrite(img_triangulo, fullfile(pastaDebug, [nomeBase '_etapa4_triangulo_escolhido.png']));
                 end
-            else
-                fprintf('Menos de 3 candidatos relaxados, impossível formar grupo.\n');
+                
+                finder_labels = [candidatos(melhor_grupo).obj];
+                % Atualiza img2 com os finders em verde
+                for idxc = melhor_grupo
+                    obj_cand = candidatos(idxc);
+                    for ii = 1:length(obj_cand.lin)
+                        img2(obj_cand.lin(ii), obj_cand.col(ii), 2) = 255;
+                        img2(obj_cand.lin(ii), obj_cand.col(ii), 3) = 0;
+                    end
+                    img2 = desenhar_poligono(img2, obj_cand.corners, [255,255,255]);
+                end
             end
+        else
+            fprintf('Menos de 3 candidatos relaxados, impossível formar grupo.\n');
         end
         
-        % --- Imagem 3: apenas os finder patterns (verde) sobre fundo preto ---
+        % imagem 3: apenas os finder patterns (verde) sobre fundo preto 
         img3 = zeros([size(bordas), 3], 'uint8');
         for obj = finder_labels
             [lin, col] = find(abs(bordas) == obj);
@@ -284,42 +281,9 @@ function qrcode()
             fprintf('Nenhum finder pattern encontrado em %s (mesmo com relaxamento)\n', nomeBase);
         end
 
-        % --- Painel final: binarizada | profundidade | quadrados final | finder final ---
-        painel = [img_bin, img1, img2, img3];
-        imwrite(painel, fullfile(pastaDebug, [nomeBase '_etapa6_painel_final.png']));
-        % --- Painel do fallback (se ativado) ---
-        if fallback_ativado && ~isempty(finder_labels)
-            imagens_fallback = {};
-            if exist('img_candidatos', 'var') && ~isempty(img_candidatos)
-                imagens_fallback{end+1} = img_candidatos;
-            end
-            if exist('img_grupos', 'var') && ~isempty(img_grupos)
-                imagens_fallback{end+1} = img_grupos;
-            end
-            if exist('img_triangulo', 'var') && ~isempty(img_triangulo)
-                imagens_fallback{end+1} = img_triangulo;
-            elseif exist('img_melhor_grupo', 'var') && ~isempty(img_melhor_grupo)
-                imagens_fallback{end+1} = img_melhor_grupo;
-            end
-            
-            if ~isempty(imagens_fallback)
-                % Encontra a altura máxima
-                alturas = cellfun(@(x) size(x,1), imagens_fallback);
-                altura_max = max(alturas);
-                % Redimensiona cada imagem para a altura máxima (mantendo proporção)
-                for i = 1:length(imagens_fallback)
-                    [h, w, ~] = size(imagens_fallback{i});
-                    if h ~= altura_max
-                        fator = altura_max / h;
-                        nova_largura = round(w * fator);
-                        imagens_fallback{i} = imresize(imagens_fallback{i}, [altura_max, nova_largura]);
-                    end
-                end
-                % Concatena horizontalmente
-                painel_fallback = horzcat(imagens_fallback{:});
-                imwrite(painel_fallback, fullfile(pastaDebug, [nomeBase '_etapa7_fallback_steps.png']));
-            end
-        end
+        % painel final: binarizada | profundidade | quadrados final | finder final
+        painel = [img_bin, img1, img_candidatos, img_grupos, img3];
+        imwrite(painel, fullfile(pastaDebug, [nomeBase '_etapa5_painel_final.png']));
 
         fprintf('Fim do processamento para: %s\n', nomeArquivo);
     end
@@ -394,65 +358,6 @@ function [corners, largura, altura] = obter_retangulo_orientado(lin, col)
     altura = max_y - min_y;
 end
 
-
-function is_finder = verificar_finder_pattern(arvore, saida, obj)
-    % Verifica se o objeto 'obj' (número ímpar) é um finder pattern
-    is_finder = false;
-    % 1) Objeto deve ter exatamente 1 fundo filho
-    if ~isKey(arvore.obj_children, obj)
-        return;
-    end
-    filhos_fundo = arvore.obj_children(obj);
-    if length(filhos_fundo) ~= 1
-        return;
-    end
-    fundo_interno = filhos_fundo(1);
-    
-    % 2) Esse fundo deve ter exatamente 1 objeto filho
-    if ~isKey(arvore.fundo_children, fundo_interno)
-        return;
-    end
-    filhos_obj = arvore.fundo_children(fundo_interno);
-    if length(filhos_obj) ~= 1
-        return;
-    end
-    obj_interno = filhos_obj(1);
-    
-    % 3) Calcular centros (média das coordenadas) de cada componente
-    [lin_ext, col_ext] = find(abs(saida) == obj);
-    [lin_int, col_int] = find(abs(saida) == obj_interno);
-    [lin_fundo, col_fundo] = find(saida == fundo_interno); % fundo positivo
-    
-    if isempty(lin_ext) || isempty(lin_int) || isempty(lin_fundo)
-        return;
-    end
-    
-    centro_ext = [mean(col_ext), mean(lin_ext)];
-    centro_int = [mean(col_int), mean(lin_int)];
-    centro_fundo = [mean(col_fundo), mean(lin_fundo)];
-    
-    % Distância entre centros (em pixels)
-    dist_ext_int = norm(centro_ext - centro_int);
-    dist_ext_fundo = norm(centro_ext - centro_fundo);
-    if dist_ext_int > 5 || dist_ext_fundo > 5   % tolerância
-        return;
-    end
-    
-    % 4) Razão de tamanhos: bounding boxes orientados
-    [~, larg_ext, alt_ext] = obter_retangulo_orientado(lin_ext, col_ext);
-    [~, larg_int, alt_int] = obter_retangulo_orientado(lin_int, col_int);
-    tamanho_ext = mean([larg_ext, alt_ext]);
-    tamanho_int = mean([larg_int, alt_int]);
-    razao = tamanho_ext / tamanho_int;
-    % Razão esperada ~ 7/3 ≈ 2.33 (com margem)
-    if razao >= 1.8 && razao <= 3.0
-        is_finder = true;
-    end
-end
-
-% =========================================================================
-% Desenha um polígono fechado (conectando os pontos) numa imagem RGB
-% =========================================================================
 function img = desenhar_poligono(img, pontos, cor)
     pontos = round(pontos);
     n = size(pontos, 1);
