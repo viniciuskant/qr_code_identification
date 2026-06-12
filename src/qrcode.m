@@ -48,20 +48,14 @@ function qrcode()
             [img_grupos, grupos] = agrupa_por_tamanho(candidatos, img_grupos, img_path, VERBOSE);
 
             if ~isempty(grupos)
-                % imagem do grupo selecionado (ciano)
-                img_path = fullfile(pastaDebug, [nomeBase '_etapa3_0_grupo_selecionado.png']);
-                [img_melhor_grupo, melhor_grupo] = escolhe_melhor_grupo (bordas, candidatos, grupos, img_path, VERBOSE);
-                
-                % Sub‑seleção por triângulo se houver mais de 3
-                if length(melhor_grupo) > 3
-                    %img com a escolha dos melhores 3 pontos em verde
-                    img_path = fullfile(pastaDebug, [nomeBase '_etapa3_1_filtro_grupo_selecionado.png']);
-                    altura = size(bordas, 1);
-                    largura = size(bordas, 2);
-                    min_area = round((largura * altura ) * 0.05);
-                    min_ratio = 0.6;
-                    [img_triangulo, melhor_grupo] = melhor_combinacao_3(bordas, candidatos, melhor_grupo, img_path, min_area, min_ratio, VERBOSE);
-                end
+                %img com a escolha dos melhores 3 pontos em verde
+                img_path = fullfile(pastaDebug, [nomeBase '_etapa3_1_filtro_grupo_selecionado.png']);
+                altura = size(bordas, 1);
+                largura = size(bordas, 2);
+                min_area = round((largura * altura ) * 0.05);
+                min_ratio = 0.6;
+                [img_triangulo, melhor_grupo] = melhor_combinacao_3(bordas, candidatos, grupos, img_path, min_area, min_ratio, VERBOSE);
+                % end
                 
                 finder_labels = [candidatos(melhor_grupo).obj];
                 % Atualiza img2 com os finders em verde
@@ -105,24 +99,45 @@ function qrcode()
 end
 
 
-function [img_triangulo, melhor_grupo] = melhor_combinacao_3(bordas, candidatos, melhor_grupo, img_path, min_area, min_ratio, VERBOSE)
-    % Parâmetros padrão
+function [img_triangulo, melhor_grupo] = melhor_combinacao_3(bordas, candidatos, grupos, img_path, min_area, min_ratio, VERBOSE)
     if nargin < 5, min_area = 10; end
     if nargin < 6, min_ratio = 0.7; end
     if nargin < 7, VERBOSE = false; end
 
-    combos = nchoosek(melhor_grupo, 3);
-    
-    melhor_relaxado = []; % apenas razão >= min_ratio, menor raio
-    melhor_restrito = []; % razão >= min_ratio E área >= min_area, menor raio
-    melhor_por_area = []; % fallback: maior área (ignora razão e área mínima)
-    
+    %todas as combinações de 3 a partir de todos os grupos
+    combos_cell = {};
+    for g = 1:length(grupos)
+        grupo_atual = grupos{g};
+        if length(grupo_atual) >= 3
+            combos_grupo = nchoosek(grupo_atual, 3);
+            for c = 1:size(combos_grupo, 1)
+                combos_cell{end+1} = combos_grupo(c, :);
+            end
+        end
+    end
+
+    if ~isempty(combos_cell)
+        combos = cell2mat(combos_cell'); 
+    else
+        combos = [];
+    end
+
+    fprintf('Total de combinações de 3: %d\n', size(combos, 1));
+
+    melhor_relaxado = []; % razão >= min_ratio & não colinear, desempate menor raio
+    melhor_restrito = []; % razão >= min_ratio & área >= min_area & não colinear, desempate maior razao
+    melhor_por_ratio = []; % não colinear, maior razao (ignora razão e área mínima)
+    melhor_por_ratio_sem_colinear = []; % fallback: maior razao (ignora razão, área mínima e colinearidade)
+
     melhor_raio_relaxado = inf;
-    melhor_raio_restrito = inf;
     melhor_area_fallback = -inf;
-    
-    for c = 1:size(combos,1)
-        idxs = combos(c,:);
+
+    melhor_ratio_restrito = -inf;
+    melhor_ratio_fallback = -inf;
+    melhor_ratio_fallback_sem_colinear = -inf;
+
+    for c = 1:size(combos, 1)
+        idxs = combos(c, :); 
         p1 = candidatos(idxs(1)).centro;
         p2 = candidatos(idxs(2)).centro;
         p3 = candidatos(idxs(3)).centro;
@@ -136,13 +151,24 @@ function [img_triangulo, melhor_grupo] = melhor_combinacao_3(bordas, candidatos,
         ratio3 = min(d13,d23) / max(d13,d23);
         min_ratio_combo = min([ratio1, ratio2, ratio3]);
         
-        % fator de colinearidade, TODO tentar achar uma outra maneira
+        % fallback por maior razao
+        if min_ratio_combo > melhor_ratio_fallback_sem_colinear
+            melhor_ratio_fallback_sem_colinear = min_ratio_combo;
+            melhor_por_ratio_sem_colinear = idxs;
+        end
+
+        % fator de colinearidade
         area = abs((p2(1)-p1(1))*(p3(2)-p1(2)) - (p3(1)-p1(1))*(p2(2)-p1(2))) / 2;
-        
-        % fallback por maior área
-        if area > melhor_area_fallback
-            melhor_area_fallback = area;
-            melhor_por_area = idxs;
+        d_max = max([d12, d13, d23]);
+        colinearidade = area / (d_max^2);
+        if colinearidade < 0.15  
+            continue;
+        end
+
+        % por maior ratio
+        if min_ratio_combo > melhor_ratio_fallback
+            melhor_ratio_fallback = min_ratio_combo;
+            melhor_por_ratio = idxs;
         end
         
         % razão mínima
@@ -154,8 +180,8 @@ function [img_triangulo, melhor_grupo] = melhor_combinacao_3(bordas, candidatos,
                 melhor_relaxado = idxs;
             end
             %restrito: razão E área mínima
-            if area >= min_area && raio < melhor_raio_restrito
-                melhor_raio_restrito = raio;
+            if area >= min_area && melhor_ratio_restrito < min_ratio 
+                melhor_ratio_restrito = min_ratio_combo;
                 melhor_restrito = idxs;
             end
         end
@@ -173,93 +199,44 @@ function [img_triangulo, melhor_grupo] = melhor_combinacao_3(bordas, candidatos,
             fprintf('Usando critério relaxado (apenas razão≥%.2f)\n', min_ratio);
         end
     else
-        melhor_combo = melhor_por_area;
-        if VERBOSE
-            fprintf('Nenhuma combinação atende à razão mínima. Usando a de maior área (%.1f px2)\n', melhor_area_fallback);
+        if ~isempty(melhor_por_ratio)
+            melhor_combo = melhor_por_ratio;
+            if VERBOSE
+                fprintf('Nenhuma combinação atende à razão mínima. Usando a de maior razão (%.2f)\n', melhor_ratio_fallback);
+            end
+        elseif ~isempty(melhor_por_ratio_sem_colinear)
+            melhor_combo = melhor_por_ratio_sem_colinear;
+            if VERBOSE
+                fprintf('Nenhuma combinação!. Usando a de maior razão e colinear (%.2f)\n', melhor_ratio_fallback);
+            end
         end
     end
     
     melhor_grupo = melhor_combo;
     
     img_triangulo = zeros([size(bordas), 3], 'uint8');
-    for idx = melhor_grupo
-        for ii = 1:length(candidatos(idx).lin)
-            img_triangulo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 2) = 255;
+    if isempty(melhor_grupo)
+        fprintf('Nenhum candidato\n');
+    else 
+        for idx = melhor_grupo
+            for ii = 1:length(candidatos(idx).lin)
+                img_triangulo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 2) = 255;
+            end
+            img_triangulo = desenhar_poligono(img_triangulo, candidatos(idx).corners, [0,255,0]);
         end
-        img_triangulo = desenhar_poligono(img_triangulo, candidatos(idx).corners, [0,255,0]);
+        pts = [candidatos(melhor_grupo(1)).centro;
+            candidatos(melhor_grupo(2)).centro;
+            candidatos(melhor_grupo(3)).centro];
+        for i = 1:3
+            p1 = round(pts(i,:));
+            p2 = round(pts(mod(i,3)+1,:));
+            img_triangulo = desenhar_linha(img_triangulo, p1(2), p1(1), p2(2), p2(1), [255,255,255]);
+        end
     end
-    pts = [candidatos(melhor_grupo(1)).centro;
-           candidatos(melhor_grupo(2)).centro;
-           candidatos(melhor_grupo(3)).centro];
-    for i = 1:3
-        p1 = round(pts(i,:));
-        p2 = round(pts(mod(i,3)+1,:));
-        img_triangulo = desenhar_linha(img_triangulo, p1(2), p1(1), p2(2), p2(1), [255,255,255]);
-    end
-    
+
     if VERBOSE
         imwrite(img_triangulo, img_path);
     end
-end
-
-function [img_melhor_grupo, melhor_grupo] = escolhe_melhor_grupo(bordas, candidatos, grupos, img_path, VERBOSE)
-    if nargin < 5 VERBOSE = false; end
-
-    grupos_tres = {};
-    grupos_outros = {};
-    for g = 1:length(grupos)
-        if length(grupos{g}) == 3
-            grupos_tres{end+1} = grupos{g};
-        else
-            grupos_outros{end+1} = grupos{g};
-        end
-    end
-
-    if ~isempty(grupos_tres)
-        % entre os grupos de tamanho 3, escolhe o de menor raio circunscrito
-        melhor_raio = inf;
-        melhor_grupo = [];
-        for g = 1:length(grupos_tres)
-            idxs = grupos_tres{g};
-            p1 = candidatos(idxs(1)).centro;
-            p2 = candidatos(idxs(2)).centro;
-            p3 = candidatos(idxs(3)).centro;
-            raio = circumradius(p1, p2, p3);
-            if raio < melhor_raio
-                melhor_raio = raio;
-                melhor_grupo = idxs;
-            end
-        end
-    else
-        % para grupos com tamanho diferente de 3: tamanho
-        melhor_idx = 1;
-        melhor_dist = abs(length(grupos{1}) - 3);
-        tamanhos_primeiro = [candidatos(grupos{1}).tamanho];
-        melhor_tamanho = mean(tamanhos_primeiro);
-        for g = 2:length(grupos)
-            dist_atual = abs(length(grupos{g}) - 3);
-            tamanhos_atual = [candidatos(grupos{g}).tamanho];
-            tam_atual = mean(tamanhos_atual);
-            if (dist_atual < melhor_dist) || (dist_atual == melhor_dist && tam_atual > melhor_tamanho)
-                melhor_dist = dist_atual;
-                melhor_tamanho = tam_atual;
-                melhor_idx = g;
-            end
-        end
-        melhor_grupo = grupos{melhor_idx};
-    end
-
-    img_melhor_grupo = zeros([size(bordas), 3], 'uint8');
-    for idx = melhor_grupo
-        for ii = 1:length(candidatos(idx).lin)
-            img_melhor_grupo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 1) = 0;
-            img_melhor_grupo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 2) = 255;
-            img_melhor_grupo(candidatos(idx).lin(ii), candidatos(idx).col(ii), 3) = 255;
-        end
-        img_melhor_grupo = desenhar_poligono(img_melhor_grupo, candidatos(idx).corners, [0,255,255]);
-    end
-    if VERBOSE imwrite(img_melhor_grupo, img_path); end
-
 end
 
 function [img_grupos, grupos] = agrupa_por_tamanho(candidatos, img_grupos, img_path, VERBOSE)
