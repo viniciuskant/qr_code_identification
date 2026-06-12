@@ -38,7 +38,7 @@ def is_qrcode_anchor(idx, hierarchy, contours):
     for cidx in [idx, child1, child2]:
         x, y, w, h = cv2.boundingRect(contours[cidx])
         ratio = w / h
-        if not (0.83 <= ratio <= 1.2):
+        if not (0.7 <= ratio <= 1.3):
             return False
 
     return True

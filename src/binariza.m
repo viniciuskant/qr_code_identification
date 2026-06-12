@@ -1,4 +1,4 @@
-function binarizacao_png()
+function binariza()
 
     fatorReducao = 4;
 
@@ -56,12 +56,10 @@ function binarizacao_png()
 
         caminhoBIN = fullfile(pastaBinarizada,[nomeBase '.tif']);
 
-        % ========== REDUZIR RESOLUÇÃO ==========
         [h, w] = size(imgBin);
         novaAltura = round(h / fatorReducao);
         novaLargura = round(w / fatorReducao);
         imgBin = imresize(imgBin, [novaAltura, novaLargura]);
-        % ======================================
 
         imwrite(uint8(imgBin)*255, caminhoBIN, 'Compression','none');
 
@@ -144,8 +142,8 @@ function imgBin = remover_regioes_caoticas(imgBin)
     for y = 1:janela:h-janela+1
         for x = 1:janela:w-janela+1
             bloco = imgBin(y:y+janela-1, x:x+janela-1);
-            tx = sum(sum(abs(diff(bloco,1,2)))); % transições horizontais
-            ty = sum(sum(abs(diff(bloco,1,1)))); % transições verticais
+            tx = sum(sum(abs(diff(bloco,1,2))));
+            ty = sum(sum(abs(diff(bloco,1,1))));
 
             score = tx + ty;
             if score > 50
