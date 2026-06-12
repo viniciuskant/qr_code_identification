@@ -60,11 +60,11 @@ function saida = bordas_op(M)
         end
         % fundo de chegada e a prioridade é o fundo externo (0)
         if any(rotulosVizinhos == 0)
-            fundoChegada = 0;
+            fundo_chegada = 0;
         elseif ~isempty(rotulosVizinhos) % caso contrário, pega o menor rótulo de fundo encontrado
-            fundoChegada = min(rotulosVizinhos); % menor par (>0)
+            fundo_chegada = min(rotulosVizinhos); % menor par (>0)
         else
-            fundoChegada = []; % objeto não toca fundo
+            fundo_chegada = []; % objeto não toca fundo
         end
         
         rotuloObj = proximoImpar;
