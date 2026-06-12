@@ -1,8 +1,9 @@
-function binariza()
+function binariza(pastaEntrada)
 
-    fatorReducao = 4;
-
-    pastaEntrada = '../images/reais';
+    % fatorReducao = 4;
+    if nargin < 1
+        pastaEntrada = '../images/todas';
+    end
 
     if ~exist(pastaEntrada, 'dir')
         error('A pasta especificada não existe.');
@@ -57,17 +58,23 @@ function binariza()
         caminhoBIN = fullfile(pastaBinarizada,[nomeBase '.tif']);
 
         [h, w] = size(imgBin);
-        novaAltura = round(h / fatorReducao);
-        novaLargura = round(w / fatorReducao);
-        imgBin = imresize(imgBin, [novaAltura, novaLargura]);
+        % novaAltura = round(h / fatorReducao);
+        % novaLargura = round(w / fatorReducao);
+        % imgBin = imresize(imgBin, [novaAltura, novaLargura]);
+        if max(h, w) > 1000
+            fatorEscala = 1000 / max(h, w);
+            novaAltura = round(h * fatorEscala);
+            novaLargura = round(w * fatorEscala);
+            imgBin = imresize(imgBin, [novaAltura, novaLargura]);
+        end
 
         imwrite(uint8(imgBin)*255, caminhoBIN, 'Compression','none');
 
-        fprintf('Processado (resolução reduzida por %dx): %s\n', fatorReducao, nomeArquivo);
+        % fprintf('Processado (resolução reduzida por %dx): %s\n', fatorReducao, nomeArquivo);
 
     end
 
-    fprintf('Concluído!\n');
+    % fprintf('Concluído!\n');
 
 end
 
