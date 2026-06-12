@@ -120,25 +120,33 @@ function imgOut = remover_blocos_esparsos(imgBin, blocoTam)
     limiar_maximo = 85;
     % limiar_maximo = max(3 * limiar, 1);
 
-    imgOut = imgBin;
-    % Segunda passada: remover blocos fora da faixa aceitável
+    bloco_aceito = (porcentagens >= limiar_minimo) & (porcentagens <= limiar_maximo);
+
+    % dilatação: incluir vizinhos  dos blocos aceitos
+    bloco_recuperado = bloco_aceito;  % cópia inicial
     for i = 1:nLin
         for j = 1:nCol
-
-            p = porcentagens(i,j);
-
-            if (p < limiar_minimo) || (p > limiar_maximo)
-
-                y1 = (i-1)*blocoTam + 1;
-                y2 = min(i*blocoTam,h);
-
-                x1 = (j-1)*blocoTam + 1;
-                x2 = min(j*blocoTam,w);
-
-                imgOut(y1:y2,x1:x2) = 1;
-
+            if ~bloco_aceito(i,j)
+                if (i > 1 && bloco_aceito(i-1,j)) || ...
+                (i < nLin && bloco_aceito(i+1,j)) || ...
+                (j > 1 && bloco_aceito(i,j-1)) || ...
+                (j < nCol && bloco_aceito(i,j+1))
+                    bloco_recuperado(i,j) = true;
+                end
             end
+        end
+    end
 
+    imgOut = imgBin;
+    for i = 1:nLin
+        for j = 1:nCol
+            if ~bloco_recuperado(i,j)
+                y1 = (i-1)*blocoTam + 1;
+                y2 = min(i*blocoTam, h);
+                x1 = (j-1)*blocoTam + 1;
+                x2 = min(j*blocoTam, w);
+                imgOut(y1:y2, x1:x2) = 1; % pinta bloco removido de branco
+            end
         end
     end
 
