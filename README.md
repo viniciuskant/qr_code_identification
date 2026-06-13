@@ -22,22 +22,18 @@ O diretório `ref` não contém imagens capturadas. Ele contém QR Codes de refe
 Após obter as imagens, execute:
 
 ```matlab
-binarizar_png
+binariza
 ```
 
 O script gera versões binarizadas das imagens e aplica supressão de ruído.
 
 Os resultados são armazenados nos diretórios de saída correspondentes.
 
-## Detecção de cantos
+## Detecção de Padrões
 
-### `cantos.m`
+### `qrcode.m`
 
-Script auxiliar utilizado apenas para visualizar os cantos encontrados e verificar o posicionamento dos pontos detectados.
-
-### `detectar_cantos.m`
-
-Função responsável pela detecção efetiva dos cantos presentes na imagem.
+Função responsável pela detecção efetiva dos padroes de localizacao presentes na imagem. 
 
 ## Implementação em Python
 
