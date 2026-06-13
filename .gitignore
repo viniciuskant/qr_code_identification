@@ -4,5 +4,6 @@ venv/
 *.png
 *.jpeg
 *.jpg
+*.txt
 
-coords/  
+coordenadas/  
