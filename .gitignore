@@ -8,4 +8,4 @@ venv/
 
 coordenadas/  
 
-codigos_relatorio/*.m
+codigos_relatorio/**/*.m
