@@ -7,3 +7,5 @@ venv/
 *.txt
 
 coordenadas/  
+
+codigos_relatorio/*.m
