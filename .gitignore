@@ -3,6 +3,7 @@ venv/
 *.tif
 *.png
 *.jpeg
+*.svg
 *.jpg
 *.txt
 *.zip
